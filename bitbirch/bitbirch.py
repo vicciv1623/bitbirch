@@ -1038,4 +1038,15 @@ class BitBirch():
                 cluster.mol_indices = c_ids
                 cluster.centroid_ = calc_centroid(cluster.linear_sum_, cluster.n_samples_)
         return self
-            
+    
+    def recursively_traverse(self, node, levels, centroids, currLevel):
+        if node is None:
+            return
+        for i in node.subclusters_:
+            if currLevel==len(levels):
+                levels.append(1)
+                centroids.append([i.centroid_])
+            else:
+                levels[currLevel]+=1
+                centroids[currLevel].append(i.centroid_)
+            self.recursively_traverse(i.child_, levels, centroids, currLevel+1)

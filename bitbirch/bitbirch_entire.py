@@ -839,7 +839,7 @@ class BitBirch():
         self.first_call = False
         return self
     
-    def fit_leaves(self, top_cluster_ind, X, leaf_clusters):
+    def fit_leaves(self, new_clusters, X):
         threshold=self.threshold
         branching_factor=self.k // 2
 
@@ -865,7 +865,7 @@ class BitBirch():
         self.root_.prev_leaf_ = self.dummy_leaf_
 
         # build tree with largest k clusters
-        for top_cluster in [i for ind, i in enumerate(leaf_clusters) if ind in top_cluster_ind]:
+        for top_cluster in new_clusters[:self.k]:
             set_bits=np.sum(top_cluster.centroid_)
             subcluster=_BFSubcluster(linear_sum=top_cluster.linear_sum_,
                                      mol_indices=top_cluster.mol_indices)
@@ -889,14 +889,14 @@ class BitBirch():
                 self.root_.append_subcluster(new_subcluster2)
 
         # add (merge) rest of the leaves
-        '''
-        for cluster in [i for ind, i in enumerate(leaf_clusters) if ind not in top_cluster_ind]:
+        
+        for cluster in new_clusters[self.k:]:
             set_bits=np.sum(cluster.centroid_)
             subcluster=_BFSubcluster(linear_sum=cluster.linear_sum_,
                                      mol_indices=cluster.mol_indices)
             split=self.root_.insert_leaf_subcluster(subcluster,
                                                    set_bits,
-                                                   merge=True)'''
+                                                   merge=True)
             
         centroids=np.concatenate([leaf.centroids_ for leaf in self._get_leaves()])
 
@@ -1216,8 +1216,7 @@ class BitBirch():
         ind=0
         for i in self._get_leaves():
             for j in i.subclusters_:
-                if len(j.mol_indices)>1:
-                    cluster_sizes.append((len(j.mol_indices), ind))
+                cluster_sizes.append((len(j.mol_indices), ind))
                 clusters.append(j)
                 ind+=1
 
@@ -1240,7 +1239,6 @@ class BitBirch():
                         i.subclusters_[0].update(j)
                     ind+=1
             new_clusters.append(i.subclusters_[0])
-        print(len(new_clusters))
                 
         self.fit_leaves(new_clusters, X)
 

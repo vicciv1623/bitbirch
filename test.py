@@ -11,6 +11,7 @@ import time
 import sys
 from rdkit import Chem
 from pathlib import Path
+from itertools import combinations
 
 def analysis(model, data):
     clusters=eval.birch_analysis(model, data, min_size=0)
@@ -54,7 +55,7 @@ def cross_validate(fps, fold, size, birch, k):
     avg_dbi=0
     avg_k_isim=np.zeros(k)
     avg_k_pop=np.zeros(k)
-    avg_medoids=np.zeros((k,k))
+    avg_medoids=np.zeros((k,2048))
     avg_time=0
 
     for i in range(fold):
@@ -110,14 +111,11 @@ def cross_validate(fps, fold, size, birch, k):
 
 def plot_analysis(avg_results):
     for i in range(len(avg_results[0])):        
-        names=["bb_level", "bb_entire", "bb_kplusn", "bb_kplus1", "bb_k"]
-        names=names[0:2]
-        metrics=["chi","dbi","iSIM","population_size","medoid_similarity","time"]
 
         k=len(avg_results[0][2])
         x=np.arange(0,k, step=1)
         
-        if i==0 or i==1 or i==5:
+        if i==0 or i==1 or i==4:
             fig, ax=plt.subplots()
 
             values=[res[i] for res in avg_results]
@@ -148,6 +146,16 @@ def plot_analysis(avg_results):
                     bbox_inches="tight")  
         plt.show()
 
+def plot_medoids(avg_medoids_sim, comb_names):
+    fig, ax=plt.subplots(5,2,figsize=(8,10))
+    ax=ax.flatten()
+
+    for ind, i in enumerate(avg_medoids_sim):
+        ax[ind].set_title(f"{comb_names[ind][0]} and {comb_names[ind][1]}")
+        ax[ind].imshow(i)
+    plt.tight_layout()
+    plt.savefig(f"results/medoid_{sys.argv[1]}_folds_{sys.argv[2]}_size_{sys.argv[3]}_clusters.png")
+    plt.show()
 
 folder_path=Path("./results")
 folder_path.mkdir(parents=False, exist_ok=True)
@@ -176,12 +184,26 @@ birch_list=[bb, bb_level, bb_entire, bb_kplus1, bb_kplusn, bb_k]
 avg_results=[]
 avg_medoids=[]
 
-for birch in birch_list[1:3]:
+for birch in birch_list[1:]:
     results=cross_validate(fps, fold, size, birch, k)
     avg_results.append(results[:5])
     avg_medoids.append(results[5])
 
+names=["bb_level", "bb_entire", "bb_kplusn", "bb_kplus1", "bb_k"]
+#names=names[0:2]
+metrics=["chi","dbi","iSIM","population_size","time"]
+
 plot_analysis(avg_results)
+
+#analyze medoids
+comb=list(combinations(range(2),2))
+avg_medoids_sim=[]
+comb_names=[]
+for i in comb:
+    avg_medoids_sim.append(analysis_medoid(avg_medoids[i[0]],avg_medoids[i[1]]))
+    comb_names.append((names[i[0]], names[i[1]]))
+plot_medoids(avg_medoids_sim, comb_names)
+
 
 
 

@@ -39,19 +39,22 @@ def analysis(model, data):
         pop[ind]=i.shape[0]
         medoids.append(i[eval.calculate_medoid(i)])
 
-    medoid_sim=np.zeros((k,k))
-    for ind1,i in enumerate(medoids):
-        for ind2,j in enumerate(medoids):
-            medoid_sim[ind1,ind2]=eval.jt_pair(i,j)
+    return [chi, dbi, iSIM, pop, medoids]
 
-    return [chi, dbi, iSIM, pop, medoid_sim]
+def analysis_medoid(medoids1, medoids2):
+    medoid_sim=np.zeros((k,k))
+    for ind1, i in enumerate(medoids1):
+        for ind2, j in enumerate(medoids2):
+            medoid_sim[ind1, ind2]=eval.jt_pair(i,j)
+    
+    return medoid_sim
 
 def cross_validate(fps, fold, size, birch, k):
     avg_chi=0
     avg_dbi=0
     avg_k_isim=np.zeros(k)
     avg_k_pop=np.zeros(k)
-    avg_k_medoid_sim=np.zeros((k,k))
+    avg_medoids=np.zeros((k,k))
     avg_time=0
 
     for i in range(fold):
@@ -73,41 +76,42 @@ def cross_validate(fps, fold, size, birch, k):
         model.fit(data)
         end_time=time.perf_counter()
 
-        
+        '''
         levels=[]
         centroids=[]
         targetLevel=0
         node=model.root_
         model.recursively_traverse(node, levels, centroids, targetLevel)
-        print(levels)
+        print(levels)'''
         
 
 
         print(len(model.get_centroids()))
         print("birch ", end_time-start_time)
 
-        '''
+        
         results=analysis(model, data)
         avg_chi+=results[0]
         avg_dbi+=results[1]
         avg_k_isim+=results[2]
         avg_k_pop+=results[3]
-        avg_k_medoid_sim+=results[4]
+        avg_medoids+=results[4]
         avg_time+=end_time-start_time
-        '''
+        
     
     avg_chi/=fold
     avg_dbi/=fold
     avg_k_isim/=fold
     avg_k_pop/=fold
-    avg_k_medoid_sim/=fold
+    avg_medoids/=fold
     avg_time/=fold
 
-    return [avg_chi, avg_dbi, avg_k_isim, avg_k_pop, avg_k_medoid_sim, avg_time]
+    return [avg_chi, avg_dbi, avg_k_isim, avg_k_pop, avg_time, avg_medoids]
 
 def plot_analysis(avg_results):
     for i in range(len(avg_results[0])):        
-        names=["bb_level", "bb_kplus1", "bb_kplusn", "bb_entire", "bb_k"]
+        names=["bb_level", "bb_entire", "bb_kplusn", "bb_kplus1", "bb_k"]
+        names=names[0:2]
         metrics=["chi","dbi","iSIM","population_size","medoid_similarity","time"]
 
         k=len(avg_results[0][2])
@@ -168,14 +172,17 @@ k=int(sys.argv[3])
 branching_factor=50
 threshold=0.5
 
-birch_list=[bb, bb_entire, bb_level, bb_kplus1, bb_kplusn, bb_entire, bb_k]
+birch_list=[bb, bb_level, bb_entire, bb_kplus1, bb_kplusn, bb_k]
 avg_results=[]
+avg_medoids=[]
 
-for birch in birch_list[1:2]:
+for birch in birch_list[1:3]:
     results=cross_validate(fps, fold, size, birch, k)
-    avg_results.append(results)
+    avg_results.append(results[:5])
+    avg_medoids.append(results[5])
 
-#plot_analysis(avg_results)
+plot_analysis(avg_results)
+
 
 
 

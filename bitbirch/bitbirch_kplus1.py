@@ -622,49 +622,44 @@ class BitBirch():
             
             temp_centroids=np.concatenate([leaf.centroids_ for leaf in self._get_leaves()])
             if len(temp_centroids)==k+1:
-                #find most similar two leaf subclusters 
-                pop_counts = np.sum(temp_centroids, axis=1)
-                pop_mols = np.sum(temp_centroids, axis=1).reshape(-1,1)
-                ei = np.einsum("ij,kj->ik", temp_centroids, temp_centroids)
-                
-                tanis = ei/(pop_counts + pop_mols -ei)
-                tanis[tanis==1]=-1
+                most_sims=[-1,-1,-1]
+                max_tani=0
+                for ind, i in enumerate(self._get_leaves()):
+                    temp_centroids=i.centroids_
+                    #find most similar two leaf subclusters 
+                    pop_counts = np.sum(temp_centroids, axis=1)
+                    pop_mols = np.sum(temp_centroids, axis=1).reshape(-1,1)
+                    ei = np.einsum("ij,kj->ik", temp_centroids, temp_centroids)
 
+                    tanis = ei/(pop_counts + pop_mols -ei)
+                    tanis[tanis==1]=-1
+
+                    temp_max=np.max(tanis)
+                    if temp_max>max_tani:
+                        max_tani=temp_max
+
+                        index=list(np.unravel_index(np.argmax(tanis), tanis.shape))
+                        index.sort()
+
+                        most_sims[0]=ind
+                        most_sims[1]=index[0]
+                        most_sims[2]=index[1]
+                                    
                 #pdb.set_trace()
-                index=list(np.unravel_index(np.argmax(tanis), tanis.shape))
-                index.sort()
-
-                #figure out which leaf node and subclusters index[0] and index[1] is
-                leaf_size=[]
-                for leaf in self._get_leaves():
-                    leaf_size.append(len(leaf.subclusters_))
-
-                node=0
-                sub=[0,0]
-                for ind, i in enumerate(leaf_size):
-                    if index[0]-i<0:
-                        sub[0]=index[0]
-                        sub[1]=index[1]
-                        node=ind
-                        break
-                    else:
-                        index[0]-=i
-                        index[1]-=i
-                
-                #pdb.set_trace()
-                node=self._get_leaves()[node]
+                node=self._get_leaves()[most_sims[0]]
                 #merge and update
-                node.subclusters_[sub[0]].update(node.subclusters_[sub[1]])
-                node.centroids_[sub[0]]=node.subclusters_[sub[0]].centroid_
-                node.init_centroids_[sub[0]]=node.subclusters_[sub[0]].centroid_
+                node.subclusters_[most_sims[1]].update(node.subclusters_[most_sims[2]])
+                node.centroids_[most_sims[1]]=node.subclusters_[most_sims[1]].centroid_
+                node.init_centroids_[most_sims[1]]=node.subclusters_[most_sims[1]].centroid_
 
                 #delete necessary
-                del node.subclusters_[sub[1]]
-                node.centroids_=np.delete(node.centroids_, sub[1], axis=0)
-                node.init_centroids_[sub[1]:-1,:]=node.init_centroids_[sub[1]+1:,:]
+                del node.subclusters_[most_sims[2]]
+                node.centroids_=np.delete(node.centroids_, most_sims[2], axis=0)
+                node.init_centroids_[most_sims[2]:-1,:]=node.init_centroids_[most_sims[2]+1:,:]
                 node.init_centroids_[-1]=np.zeros((1,n_features), dtype=d_type)
 
-                temp_centroids=len(np.concatenate([leaf.centroids_ for leaf in self._get_leaves()]))
+                #temp_centroids=len(np.concatenate([leaf.centroids_ for leaf in self._get_leaves()]))
+                #print((temp_centroids))
 
         centroids = np.concatenate([leaf.centroids_ for leaf in self._get_leaves()])
         self.subcluster_centers_ = centroids

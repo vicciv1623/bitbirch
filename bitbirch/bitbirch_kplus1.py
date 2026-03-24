@@ -561,7 +561,8 @@ class BitBirch():
         k=self.k
 
         n_features = X.shape[1]
-        d_type = X.dtype
+        #d_type = X.dtype
+        d_type=np.uint64
 
         # If partial_fit is called for the first time or fit is called, we
         # start a new tree.
@@ -594,6 +595,7 @@ class BitBirch():
 
         for sample in iter_func(X):
             set_bits = np.sum(sample)
+            sample=sample.astype(np.uint64)
             subcluster = _BFSubcluster(linear_sum=sample, mol_indices = [self.index_tracker])
             split = self.root_.insert_bf_subcluster(subcluster, set_bits,subcluster.parent_, singly)
 

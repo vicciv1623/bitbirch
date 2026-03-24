@@ -27,6 +27,7 @@
 import numpy as np
 from scipy import sparse
 from bitbirch.pruning import lazyPrune
+import pdb
 
 def set_merge(merge_criterion, tolerance=0.05):
     """
@@ -567,7 +568,8 @@ class BitBirch():
         k=self.k
 
         n_features = X.shape[1]
-        d_type = X.dtype
+        #d_type = X.dtype
+        d_type=np.uint64
 
         flag=False
 
@@ -602,6 +604,7 @@ class BitBirch():
 
         for sample in iter_func(X):
             set_bits = np.sum(sample)
+            sample=sample.astype(np.uint64)
             subcluster = _BFSubcluster(linear_sum=sample, mol_indices = [self.index_tracker])
             split = self.root_.insert_bf_subcluster(subcluster, set_bits,subcluster.parent_, singly, flag)
 
@@ -632,7 +635,6 @@ class BitBirch():
                 flag=True
 
         centroids = np.concatenate([leaf.centroids_ for leaf in self._get_leaves()])
-        #print(len(centroids))
 
         self.subcluster_centers_ = centroids
         self._n_features_out = self.subcluster_centers_.shape[0]

@@ -607,7 +607,8 @@ class BitBirch():
         branching_factor = self.branching_factor
 
         n_features = X.shape[1]
-        d_type = X.dtype
+        #d_type = X.dtype
+        d_type=np.uint64
 
         # If partial_fit is called for the first time or fit is called, we
         # start a new tree.
@@ -640,6 +641,7 @@ class BitBirch():
 
         for sample in iter_func(X):
             set_bits = np.sum(sample)
+            sample=sample.astype(np.uint64)
             subcluster = _BFSubcluster(linear_sum=sample, mol_indices = [self.index_tracker])
             split = self.root_.insert_bf_subcluster(subcluster, set_bits,subcluster.parent_, singly)
 
@@ -671,7 +673,6 @@ class BitBirch():
         self._n_features_out = self.subcluster_centers_.shape[0]
         
         self.first_call = False
-        print(len(self.get_centroids()))
 
         self.find_level_k()
         return self
@@ -1141,7 +1142,6 @@ class BitBirch():
             if i > self.k:
                 targetLevel=ind
                 break
-        print(levels)
 
         # merge clusters 
         currK=[levels[targetLevel]]
@@ -1163,8 +1163,6 @@ class BitBirch():
         for i in leaves[1:]:
             curr.next_leaf_=i
             curr=curr.next_leaf_
-
-        print(len(leaves)," ",len(self._get_leaves()))
 
         # or kmeans?? https://github.com/aihubprojects/Machine-Learning-From-Scratch/blob/master/K-Means%20from%20Scratch.ipynb
         # find k centroids -> problem is though if we have # subclusters > k then we will need

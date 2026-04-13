@@ -1106,16 +1106,15 @@ class BitBirch():
             self.recursively_traverse(i.child_, levels, centroids, currLevel+1)
 
     def leaf_rearrange(self, node):
-        prev_leaf=[-1]
         leaves=[]
         
-        def link_leaves(node, prev_leaf):
+        def link_leaves(node):
             if node is None:
                 return 
             
             for i in node.subclusters_:
                 if not i.child_.is_leaf:
-                    link_leaves(i.child_, prev_leaf)
+                    link_leaves(i.child_)
                 else:
                     # this is new leaf
                     '''
@@ -1127,7 +1126,7 @@ class BitBirch():
                     '''
                     leaves.append(i.child_)
         
-        link_leaves(node, prev_leaf)
+        link_leaves(node)
         return leaves
 
 
@@ -1157,12 +1156,25 @@ class BitBirch():
             prevK=currK[0]
 
         leaves=self.leaf_rearrange(self.root_)
+        print("leaves: ",len(leaves))
 
         self.dummy_leaf_.next_leaf_=leaves[0]
-        curr=self.dummy_leaf_.next_leaf_
-        for i in leaves[1:]:
-            curr.next_leaf_=i
-            curr=curr.next_leaf_
+        for ind, i in enumerate(leaves[:-1]):
+            i.next_leaf_=leaves[ind+1]
+
+        leaves[-1].next_leaf_=None
+
+        # leaf_ptr = self.dummy_leaf_.next_leaf_
+        # leaves = []
+        # iter=0
+        # while leaf_ptr is not None:
+        #     if iter>40:
+        #         break
+        #     leaves.append(leaf_ptr)
+        #     leaf_ptr = leaf_ptr.next_leaf_
+        #     print(iter)
+        #     iter+=1
+        # print(len(leaves))
 
         # or kmeans?? https://github.com/aihubprojects/Machine-Learning-From-Scratch/blob/master/K-Means%20from%20Scratch.ipynb
         # find k centroids -> problem is though if we have # subclusters > k then we will need

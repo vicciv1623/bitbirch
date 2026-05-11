@@ -5,58 +5,34 @@ import bitbirch.bitbirch_kplus1 as bb_kplus1
 import bitbirch.bitbirch_kplusn as bb_kplusn 
 import bitbirch.bitbirch_entire as bb_entire
 import bitbirch.cluster_control as eval
+
 import numpy as np
 import matplotlib.pyplot as plt
 import time
 import types
 import sys
 import generate_fps
+import pandas
+import pickle
+
+from pathlib import Path
 from rdkit import Chem
-from sklearn.cluster import KMeans
-from sklearn.metrics import pairwise_distances
+from rdkit.Chem import Draw
 from pathlib import Path
 from itertools import combinations
 
-#https://www.geeksforgeeks.org/machine-learning/how-to-use-custom-distance-functions-for-clustering/#limitations-of-kmeans-in-scikitlearn
-def custom_distance(p1, p2):
-    return eval.jt_pair(p1,p2)
-
-# Assign clusters based on custom distance function
-def assign_clusters(X, centroids):
-    clusters = []
-    for x in X:
-        distances = [custom_distance(x, c) for c in centroids]
-        clusters.append(np.argmax(distances))
-    return clusters
-
-# Compute new centroids as mean of assigned points
-def compute_centroids(X, labels, k):
-    centroids = []
-    for i in range(k):
-        points = X[np.array(labels) == i]
-        centroids.append(points.mean(axis=0))
-    return np.array(centroids)
-
-# Main function to perform custom K-Means clustering
-def k_means_custom(X, k, max_iter=100):
-    rng=np.random.default_rng(0)
-    centroids = X[rng.choice(len(X), k, replace=False)]
-    for _ in range(max_iter):
-        labels = assign_clusters(X, centroids)
-        new_centroids = compute_centroids(X, labels, k)
-        if np.all(centroids == new_centroids):
-            break
-        centroids = new_centroids
-    return labels, centroids, k
+sklearn_path=Path('/home/honestkids/Documents/MQ_lab_research/scikit-learn')
+sys.path.insert(0,str(sklearn_path))
+from sklearn.cluster import KMeans
 
 
-
-
-def analysis(model, data, kmeans=False, kmean_model=None):
+def analysis(model, data, name, kmeans=False, kmean_model=None):
     if not kmeans:
         clusters=eval.birch_analysis(model, data, min_size=0)
     else:
-        labels, centroids, k=kmean_model
+        labels=kmean_model.labels_
+        k=len(set(labels))
+
         clusters=[np.empty((0,data.shape[1])) for _ in range(k)]
         mol_ids=model.get_cluster_mol_ids()
 
@@ -64,10 +40,6 @@ def analysis(model, data, kmeans=False, kmean_model=None):
             clusters[i]=np.concatenate((clusters[i], data[mol_ids[ind]]), axis=0)
             
     clusters=sorted(clusters, key = lambda x: len(x), reverse = True)
-        
-    if kmeans:
-        for i in clusters:
-            print(len(i))
 
     #evaluate clusters CHI and DBI index
     chi=eval.chi(clusters, reps=False, rep_type="centroid",
@@ -79,7 +51,6 @@ def analysis(model, data, kmeans=False, kmean_model=None):
     #calculate popultion of each cluster
     #calculate tani between medoid of each cluster pair
     k=len(clusters)
-    #print("k",k)
     iSIM=np.zeros(k)
     pop=np.zeros(k)
     medoids=[]
@@ -92,9 +63,21 @@ def analysis(model, data, kmeans=False, kmean_model=None):
         pop[ind]=i.shape[0]
         medoids.append(i[eval.calculate_medoid(i)])
 
+    with open(f"saved_models/iSIM/{name}_iSIM.pkl", "wb") as f:
+        pickle.dump(iSIM, f)
+    print("saved pickle iSIM")
+
+    with open(f"saved_models/pop/{name}_pop.pkl", "wb") as f:
+        pickle.dump(pop, f)
+    print("saved pickle pop")
+
+    with open(f"saved_models/medoid/{name}_medoid.pkl", "wb") as f:
+        pickle.dump(medoids, f)
+    print("saved pickle medoid")
+
     return [chi, dbi, iSIM, pop, medoids]
 
-def analysis_medoid(medoids1, medoids2):
+def analysis_medoid(medoids1, medoids2, name):
     medoid_sim=np.zeros((k,k))
     for ind1, i in enumerate(medoids1):
         for ind2, j in enumerate(medoids2):
@@ -102,7 +85,21 @@ def analysis_medoid(medoids1, medoids2):
     
     return medoid_sim
 
-def cross_validate(fps, fold, size, birch, k):
+def retrieve_structure(model, data, random_indices):
+    leaves = model._get_leaves()
+    
+    for i,leave in enumerate(leaves):
+        for j,subcluster in enumerate(leave.subclusters_):
+                mols=[]
+                for k in range(5):
+                    smi=smiles.loc[random_indices[subcluster.mol_indices[k]], 'SMILES'].strip()
+                    mol=Chem.MolFromSmiles(smi)
+                    if mol:
+                        mols.append(mol)
+                img=Draw.MolsToGridImage(mols,molsPerRow=5, subImgSize=(200,200))
+                img.save(f"img/{i}_leave_{j}_subcluster.png")
+
+def cross_validate(fps, size, birch, k, name):
     rng=np.random.default_rng(0)
     random_indices=rng.choice(fps.shape[0],
                                 size=size,
@@ -116,7 +113,7 @@ def cross_validate(fps, fold, size, birch, k):
         start_time=time.perf_counter()
         model.fit(data)
         end_time=time.perf_counter()
-    elif birch==k_means_custom:
+    elif birch==KMeans:
         bb.set_merge("diameter")
         model=bb.BitBirch(threshold=threshold,
                              branching_factor=branching_factor)
@@ -126,7 +123,8 @@ def cross_validate(fps, fold, size, birch, k):
 
         start_time=time.perf_counter()-(end_time-start_time)
         leaf_centroids=model.get_centroids()
-        kmean=k_means_custom(np.array(leaf_centroids), k)
+        kmean=KMeans(n_clusters=k, init="random")
+        kmean.fit(np.array(leaf_centroids))
         end_time=time.perf_counter()
     else:
         birch.set_merge("diameter")
@@ -137,28 +135,25 @@ def cross_validate(fps, fold, size, birch, k):
         model.fit(data)
         end_time=time.perf_counter()
 
-    
-    # levels=[]
-    # centroids=[]
-    # targetLevel=0
-    # node=model.root_
-    # model.recursively_traverse(node, levels, centroids, targetLevel)
-    # print(levels)
-    
-    #print(len(model.get_centroids()))
-    #print(model.n_clusters_)
-    print("birch ", end_time-start_time)
+    #retrieve_structure(model, data, random_indices)
 
-    results=analysis(model, data, kmeans=True if birch==k_means_custom else False,
-                     kmean_model=kmean if birch==k_means_custom else None)
+    print("birch ", end_time-start_time)
+    results=analysis(model, data, name, 
+                     kmeans=True if birch==KMeans else False,
+                     kmean_model=kmean if birch==KMeans else None)
+    
     print("analysis done")
     avg_chi=results[0]
     avg_dbi=results[1]
     avg_k_isim=results[2]
-    print("isim shape", avg_k_isim.shape)
-    avg_k_pop=results[3]
+    avg_k_pop=results[3]/size
     avg_medoids=results[4]
     avg_time=end_time-start_time
+
+    print("chi:", avg_chi, "dbi:", avg_dbi, "time:", avg_time, "\n")
+    with open(f"saved_models/model/{name}.pkl", "wb") as f:
+        pickle.dump(model, f)
+    print("saved pickle model")
 
     return [avg_chi, avg_dbi, avg_k_isim, avg_k_pop, avg_time, avg_medoids]
 
@@ -176,12 +171,13 @@ def plot_analysis(avg_results):
             ax.set_title(metrics[i])
             print(names,values)
         elif i==2 or i==3:
-            fig, ax=plt.subplots()
-            
-            for j in avg_results:
-                ax.plot(x,j[i])
-            ax.set_title(metrics[i])
-            ax.legend(names)
+            fig, ax=plt.subplots(2,2, figsize=(8,8))
+            ax=ax.flatten()
+            fig.suptitle(metrics[i])
+            for ind,j in enumerate(avg_results):
+                ax[ind].plot(x,j[i])
+                ax[ind].set_title(names[ind])
+
         else:
             fig, ax=plt.subplots(3,2, figsize=(8,10))
             ax=ax.flatten()
@@ -196,7 +192,7 @@ def plot_analysis(avg_results):
 
             plt.tight_layout()
 
-        plt.savefig(f"results/{metrics[i]}_{sys.argv[1]}_folds_{sys.argv[2]}_size_{sys.argv[3]}_clusters.png",
+        plt.savefig(f"results/{metrics[i]}_{sys.argv[1]}_size_{sys.argv[2]}_clusters.png",
                     bbox_inches="tight")  
         plt.show()
 
@@ -208,7 +204,7 @@ def plot_medoids(avg_medoids_sim, comb_names):
         ax[ind].set_title(f"{comb_names[ind][0]} and {comb_names[ind][1]}")
         ax[ind].imshow(i)
     plt.tight_layout()
-    plt.savefig(f"results/medoid_{sys.argv[1]}_folds_{sys.argv[2]}_size_{sys.argv[3]}_clusters.png")
+    plt.savefig(f"results/medoid_{sys.argv[1]}_size_{sys.argv[2]}_clusters.png")
     plt.show()
 
 '''
@@ -240,44 +236,80 @@ for i in range(1,10):
 np.save("../smi/BRD4_train_total.npy", fps)
 
 '''
+# file_list=["../smi/BRD4_train_000.smi","../smi/BRD4_train_001.smi","../smi/BRD4_train_002.smi",
+#            "../smi/BRD4_train_003.smi","../smi/BRD4_train_004.smi","../smi/BRD4_train_005.smi",
+#            "../smi/BRD4_train_006.smi","../smi/BRD4_train_007.smi","../smi/BRD4_train_008.smi",
+#            "../smi/BRD4_train_009.smi"]
+# output_file="../smi/BRD4_train_total.smi"
+
+# line_count=0
+# with open(output_file, 'w') as outfile:
+#     for file in file_list:
+#         with open(file, 'r') as infile:
+#             for line in infile:
+#                 outfile.write(line)
+# line_count=0
+# with open(output_file, 'r') as f:
+#     line_count=sum(1 for line in f)
+# print(f"lines: {line_count}")
+
+# smiles=pandas.read_csv("../smi/BRD4_train_total.smi", names=['SMILES'])
+# print(len(smiles))
+# print((smiles.loc[0, 'SMILES']))
+
 fps=np.load("../smi/BRD4_train_total.npy")
 print("load")
 
-fold=int(sys.argv[1])
-size=int(sys.argv[2])
-k=int(sys.argv[3])
+size=int(sys.argv[1])
+k=int(sys.argv[2])
 branching_factor=50
 threshold=0.5
 
-birch_list=[bb, bb_level, bb_entire, bb_k, k_means_custom]
+birch_list=[bb, bb_level, bb_entire, bb_k, KMeans]
 avg_results=[]
 avg_medoids=[]
 
-for birch in birch_list[1:]:
-    results=cross_validate(fps, fold, size, birch, k)
+for birch in birch_list[3:4]:
+    results=cross_validate(fps, size, birch, k, "bb_k")
     avg_results.append(results[:5])
     avg_medoids.append(results[5])
 
-names=["bb", "bb_level", "bb_entire", "bb_k", "kmeans"]
-names=names[1:]
-# names=names[2:]
-metrics=["chi","dbi","iSIM","population_size","time"]
+names=["bb_level", "bb_entire", "bb_k", "kmeans"]
+# metrics=["chi","dbi","iSIM","population_size","time"]
 
-plot_analysis(avg_results)
+# plot_analysis(avg_results)
 
-#analyze medoids
-comb=list(combinations(range(4),2))
-avg_medoids_sim=[]
-comb_names=[]
-for i in comb:
-    avg_medoids_sim.append(analysis_medoid(avg_medoids[i[0]],avg_medoids[i[1]]))
-    comb_names.append((names[i[0]], names[i[1]]))
-plot_medoids(avg_medoids_sim, comb_names)
+# #analyze medoids
+# comb=list(combinations(range(len(names)),2))
+# avg_medoids_sim=[]
+# comb_names=[]
+# for i in comb:
+#     avg_medoids_sim.append(analysis_medoid(avg_medoids[i[0]],avg_medoids[i[1]]))
+#     comb_names.append((names[i[0]], names[i[1]]))
+# plot_medoids(avg_medoids_sim, comb_names)
 
 
+# retrieving saved object
+# with open("saved_models/pop/bb_k_pop.pkl", "rb") as f:
+#     ret_pop=pickle.load(f)
+# with open("saved_models/iSIM/bb_k_iSIM.pkl", "rb") as f:
+#     ret_iSIM=pickle.load(f)
+# with open("saved_models/medoid/bb_k_medoid.pkl", "rb") as f:
+#     ret_medoid=pickle.load(f)
 
+# print(ret_pop)
+# print(ret_iSIM)
+# print(ret_medoid)
 
+# levels=[]
+# centroids=[]
+# targetLevel=0
+# node=model.root_
+# model.recursively_traverse(node, levels, centroids, targetLevel)
+# print(levels)
 
+#print(len(model.get_centroids()))
+#print(model.n_clusters_)
 '''
 #n=1000
 #features=50

@@ -25,4 +25,5 @@ rng=np.random.default_rng(67)
 
 model=KMeans(n_clusters=2, init="random")
 labels=model.fit_predict(data)
-print(labels)
+print(model.labels_)
+print(model.cluster_centers_)

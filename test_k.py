@@ -77,7 +77,7 @@ def analysis(model, data, name, kmeans=False, kmean_model=None):
 
     return [chi, dbi, iSIM, pop, medoids]
 
-def analysis_medoid(medoids1, medoids2, name):
+def analysis_medoid(medoids1, medoids2):
     medoid_sim=np.zeros((k,k))
     for ind1, i in enumerate(medoids1):
         for ind2, j in enumerate(medoids2):
@@ -137,7 +137,7 @@ def cross_validate(fps, size, birch, k, name):
 
     #retrieve_structure(model, data, random_indices)
 
-    print("birch ", end_time-start_time)
+    print(name, end_time-start_time)
     results=analysis(model, data, name, 
                      kmeans=True if birch==KMeans else False,
                      kmean_model=kmean if birch==KMeans else None)
@@ -151,7 +151,7 @@ def cross_validate(fps, size, birch, k, name):
     avg_time=end_time-start_time
 
     print("chi:", avg_chi, "dbi:", avg_dbi, "time:", avg_time, "\n")
-    with open(f"saved_models/model/{name}.pkl", "wb") as f:
+    with open(f"saved_models/model/{size}_{k}_{name}.pkl", "wb") as f:
         pickle.dump(model, f)
     print("saved pickle model")
 
@@ -265,41 +265,70 @@ k=int(sys.argv[2])
 branching_factor=50
 threshold=0.5
 
-birch_list=[bb, bb_level, bb_entire, bb_k, KMeans]
+names=["bb_level", "bb_entire", "bb_k", "k_means"]
+metrics=["chi","dbi","iSIM","population_size","time"]
+birch_list=[bb_level, bb_entire, bb_k, KMeans]
 avg_results=[]
 avg_medoids=[]
 
-for birch in birch_list[3:4]:
-    results=cross_validate(fps, size, birch, k, "bb_k")
+for ind,birch in enumerate(birch_list):
+    results=cross_validate(fps, size, birch, k, names[ind])
     avg_results.append(results[:5])
     avg_medoids.append(results[5])
+plot_analysis(avg_results)
 
-names=["bb_level", "bb_entire", "bb_k", "kmeans"]
-# metrics=["chi","dbi","iSIM","population_size","time"]
+#analyze medoids
+comb=list(combinations(range(len(names)),2))
+avg_medoids_sim=[]
+comb_names=[]
+for i in comb:
+    avg_medoids_sim.append(analysis_medoid(avg_medoids[i[0]],avg_medoids[i[1]]))
+    comb_names.append((names[i[0]], names[i[1]]))
+plot_medoids(avg_medoids_sim, comb_names)
 
-# plot_analysis(avg_results)
+# plot pickled results
+# chis=[]
+# times=[]
+# iSIMs=[]
+# pops=[]
+# medoids=[]
 
-# #analyze medoids
-# comb=list(combinations(range(len(names)),2))
-# avg_medoids_sim=[]
-# comb_names=[]
-# for i in comb:
-#     avg_medoids_sim.append(analysis_medoid(avg_medoids[i[0]],avg_medoids[i[1]]))
-#     comb_names.append((names[i[0]], names[i[1]]))
-# plot_medoids(avg_medoids_sim, comb_names)
+# folder=Path("saved_models/")
+# for ind, name in enumerate(names[:-1]):
+#     for file in folder.rglob("*"):
+#         if file.is_file() and name in file.name:
+#             if "iSIM" in file.name:
+#                 with open(file, "rb") as f:
+#                     load=pickle.load(f)
+#                 iSIMs.append(load)
+#             if "pop" in file.name:
+#                 with open(file, "rb") as f:
+#                     load=pickle.load(f)
+#                 pops.append(load)
+#             if "medoid" in file.name:
+#                 with open(file,"rb") as f:
+#                     load=pickle.load(f)
+#                 medoids.append(load)
 
+# x=np.arange(0,k,step=1)
 
-# retrieving saved object
-# with open("saved_models/pop/bb_k_pop.pkl", "rb") as f:
-#     ret_pop=pickle.load(f)
-# with open("saved_models/iSIM/bb_k_iSIM.pkl", "rb") as f:
-#     ret_iSIM=pickle.load(f)
-# with open("saved_models/medoid/bb_k_medoid.pkl", "rb") as f:
-#     ret_medoid=pickle.load(f)
+# fig,ax=plt.subplots(2,2, figsize=(8,8), sharey=True)
+# ax=ax.flatten()
+# fig.suptitle("iSIM")
+# for ind,j in enumerate(iSIMs):
+#     print(len(j))
+#     ax[ind].plot(x,j)
+#     ax[ind].set_title(names[ind])
+# plt.savefig(f"results/iSIM_{sys.argv[1]}_size_{sys.argv[2]}_clusters.png", bbox_inches="tight") 
 
-# print(ret_pop)
-# print(ret_iSIM)
-# print(ret_medoid)
+# fig,ax=plt.subplots(2,2, figsize=(8,8), sharey=True)
+# ax=ax.flatten()
+# fig.suptitle("pops")
+# for ind,j in enumerate(pops):
+#     ax[ind].plot(x,j/size)
+#     ax[ind].set_title(names[ind])
+# plt.savefig(f"results/pop_{sys.argv[1]}_size_{sys.argv[2]}_clusters.png", bbox_inches="tight") 
+
 
 # levels=[]
 # centroids=[]
@@ -310,97 +339,4 @@ names=["bb_level", "bb_entire", "bb_k", "kmeans"]
 
 #print(len(model.get_centroids()))
 #print(model.n_clusters_)
-'''
-#n=1000
-#features=50
-#np.random.seed(67)
-#data=np.random.randint(2, size=(n,features))
-#rng=np.random.default_rng(67)
-#data=rng.integers(2, size=(n,features))
 
-
-
-# k entire
-bb_entire.set_merge('radius')
-model_entire=bb_entire.BitBirch(threshold=threshold,
-                                branching_factor=branching_factor)
-model_entire.fit(data)
-#model_entire.trimClusters()
-#model_entire.trimClusters2(data)
-print("num of leafs entire: ", len(model_entire.get_centroids()))
-
-#cluster sizes
-list_mol_ids=model_entire.get_cluster_mol_ids()
-for i in list_mol_ids:
-    print(len(i),end=" ")
-print()
-
-
-
-
-
-# k+n
-bb_kplusn.set_merge('radius')
-model_kplusn=bb_kplusn.BitBirch(threshold=threshold,
-                                branching_factor=branching_factor,
-                                k=10,
-                                n=20)
-model_kplusn.fit(data)
-
-print("num of leafs k+n: ", len(model_kplusn.get_centroids()))
-
-#cluster sizes
-list_mol_ids=model_kplusn.get_cluster_mol_ids()
-for i in list_mol_ids:
-    print(len(i),end=" ")
-print()
-
-
-
-# k +1
-bb_kplus1.set_merge('radius')
-model_k_1=bb_kplus1.BitBirch(threshold=threshold,
-                             branching_factor=branching_factor)
-model_k_1.fit(data)
-
-print("num of leafs k+1: ", len(model_k_1.get_centroids()))
-list_mol_ids=model_k_1.get_cluster_mol_ids()
-for i in list_mol_ids:
-    print(len(i),end=" ")
-print()
-
-
-# level
-bb_level.set_merge('radius')
-model_level=bb_level.BitBirch(threshold=threshold,
-                              branching_factor=branching_factor)
-model_level.fit(data)
-model_level.find_level_k()
-print("num of leafs_level: ",len(model_level.get_centroids()))
-for i in model_level.get_cluster_mol_ids():
-    print(len(i), end=" ")
-print()
-
-
-# k leaf clusters
-bb_k.set_merge('radius')
-model_k=bb_k.BitBirch(threshold=threshold,
-                      branching_factor=branching_factor)
-model_k.fit(data)
-
-num_leafs_k=len(model_k.get_centroids())
-print("num of leafs_k: ",num_leafs_k)
-
-list_mol_ids_k=model_k.get_cluster_mol_ids()
-for i in list_mol_ids_k:
-    print(len(i),end=" ")
-print()
-'''
-
-
-
-
-
-#print(len(model_level.root_.subclusters_))
-
-    

@@ -872,7 +872,7 @@ class BitBirch():
             subcluster=_BFSubcluster(linear_sum=top_cluster.linear_sum_,
                                      mol_indices=top_cluster.mol_indices)
             subcluster.n_samples_ = len(subcluster.mol_indices)
-            subcluster.centroid_ = cluster.centroid_
+            subcluster.centroid_ = top_cluster.centroid_
             split=self.root_.insert_leaf_subcluster(subcluster,
                                                     set_bits,
                                                     merge=False)

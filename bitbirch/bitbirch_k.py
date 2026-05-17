@@ -28,6 +28,7 @@ import numpy as np
 from scipy import sparse
 from bitbirch.pruning import lazyPrune
 import pdb
+import time
 
 def set_merge(merge_criterion, tolerance=0.05):
     """
@@ -332,7 +333,7 @@ class _BFNode:
         self.centroids_[ind] = new_subcluster1.centroid_
         self.append_subcluster(new_subcluster2)
 
-    def insert_bf_subcluster(self, subcluster, set_bits, ps, singly, flag):
+    def insert_bf_subcluster(self, subcluster, set_bits, ps, singly, flag, num_centroids, ind):
         """Insert a new subcluster into the node."""
         if not self.subclusters_:
             self.append_subcluster(subcluster)
@@ -344,13 +345,19 @@ class _BFNode:
         # subclusters so that we can insert our new subcluster.
         a = np.dot(self.centroids_, subcluster.centroid_)
         sim_matrix = a / (np.sum(self.centroids_, axis = 1) + set_bits - a)
+
+        expected_size = ind / len(self.subclusters_)
+        ratios = np.array([len(cluster.mol_indices) for cluster in self.subclusters_]) / expected_size
+        weight = -2 / (1 + np.exp(-ratios + 1)) + 1
+        sim_matrix += weight
+        
         closest_index = np.argmax(sim_matrix)
         closest_subcluster = self.subclusters_[closest_index]
 
         # If the subcluster has a child, we need a recursive strategy.
         if closest_subcluster.child_ is not None:
             ps = closest_subcluster
-            split_child = closest_subcluster.child_.insert_bf_subcluster(subcluster, set_bits, ps, singly, flag)
+            split_child = closest_subcluster.child_.insert_bf_subcluster(subcluster, set_bits, ps, singly, flag, num_centroids, ind)
 
             if not split_child:
                 # If it is determined that the child need not be split, we
@@ -399,6 +406,7 @@ class _BFNode:
             # have space, so add.
             elif len(self.subclusters_) < self.branching_factor:
                 self.append_subcluster(subcluster)
+                num_centroids[0]+=1
                 if not singly:
                     closest_subcluster.parent_ = ps
                 return False
@@ -407,6 +415,7 @@ class _BFNode:
             # other subcluster. We need to split.
             else:
                 self.append_subcluster(subcluster)
+                num_centroids[0]+=1
                 return True
 
 
@@ -572,6 +581,7 @@ class BitBirch():
         d_type=np.uint64
 
         flag=False
+        num_centroids=[1]
 
         # If partial_fit is called for the first time or fit is called, we
         # start a new tree.
@@ -601,12 +611,13 @@ class BitBirch():
             iter_func = iter
         else:
             iter_func = _iterate_sparse_X
-
+        ind = 0
         for sample in iter_func(X):
             set_bits = np.sum(sample)
             sample=sample.astype(np.uint64)
             subcluster = _BFSubcluster(linear_sum=sample, mol_indices = [self.index_tracker])
-            split = self.root_.insert_bf_subcluster(subcluster, set_bits,subcluster.parent_, singly, flag)
+            split = self.root_.insert_bf_subcluster(subcluster, set_bits,subcluster.parent_, 
+                                                    singly, flag, num_centroids, ind)
 
             if split:
                 new_subcluster1, new_subcluster2 = _split_node(
@@ -628,10 +639,14 @@ class BitBirch():
                         i.parent_ = new_subcluster1
                     for i in new_subcluster2.child_.subclusters_:
                         i.parent_ = new_subcluster2
+            
+            ind += 1
 
             self.index_tracker += 1
+            if self.index_tracker%10000==0:
+                print(self.index_tracker, num_centroids[0])
 
-            if len(np.concatenate([leaf.centroids_ for leaf in self._get_leaves()]))==k:
+            if not flag and num_centroids[0]==k:
                 flag=True
 
         centroids = np.concatenate([leaf.centroids_ for leaf in self._get_leaves()])

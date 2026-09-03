@@ -25,6 +25,7 @@
 ### License: BSD 3 clause
 
 import numpy as np
+import pandas as pd
 from scipy import sparse
 from bitbirch.pruning import lazyPrune
 import pdb
@@ -53,6 +54,12 @@ def set_merge(merge_criterion, tolerance=0.05):
     if merge_criterion == 'radius':
         def merge_accept(threshold, new_ls, new_centroid, new_n, old_ls, nom_ls, old_n, nom_n):
             jt_sim = jt_isim(new_ls + new_centroid, new_n + 1) * (new_n + 1) - jt_isim(new_ls, new_n) * (new_n - 1)
+            if jt_sim>=threshold*2:
+                pass
+                #print("merged",f"{jt_sim:.4f}", end=" ")
+            else:
+                pass
+                #print("appended",f"{jt_sim:.4f}", end=" ")
             return jt_sim >= threshold*2
     elif merge_criterion == 'diameter':
         def merge_accept(threshold, new_ls, new_centroid, new_n, old_ls, nom_ls, old_n, nom_n): 
@@ -339,11 +346,12 @@ class _BFNode:
         self.append_subcluster(new_subcluster2)
 
     def insert_bf_subcluster(self, subcluster, set_bits, ps, singly, 
-                             leaf_centroids, tol, threshold):
+                             leaf_centroids, tol, threshold, sim_threshold):
         """Insert a new subcluster into the node."""
         if not self.subclusters_:
+            #leaf_centroids.append(subcluster.centroid_)
             self.append_subcluster(subcluster)
-            return (False, False)
+            return (False, False, subcluster.centroid_, None)
 
         threshold = self.threshold
         branching_factor = self.branching_factor
@@ -357,17 +365,17 @@ class _BFNode:
         # If the subcluster has a child, we need a recursive strategy.
         if closest_subcluster.child_ is not None:
             ps = closest_subcluster
-            noise, split_child = closest_subcluster.child_.insert_bf_subcluster(subcluster, set_bits, ps, singly, 
-                                                                                leaf_centroids, tol, threshold)
+            noise, split_child, new_centroid, old_centroid = closest_subcluster.child_.insert_bf_subcluster(subcluster, set_bits, ps, singly, 
+                                                                                leaf_centroids, tol, threshold, sim_threshold)
             if noise:
-                return (True, None)
+                return (True, None, None, None)
             if not split_child:
                 # If it is determined that the child need not be split, we
                 # can just update the closest_subcluster
                 closest_subcluster.update(subcluster)
                 self.init_centroids_[closest_index] = self.subclusters_[closest_index].centroid_
                 self.centroids_[closest_index] = self.subclusters_[closest_index].centroid_
-                return (False, False)
+                return (False, False, new_centroid, old_centroid)
 
             # things not too good. we need to redistribute the subclusters in
             # our child node, and add a new subcluster in the parent
@@ -384,42 +392,67 @@ class _BFNode:
                 )
 
                 if len(self.subclusters_) > self.branching_factor:
-                    return (False, True)
-                return (False, False)
+                    return (False, True, new_centroid, old_centroid)
+                return (False, False, new_centroid, old_centroid)
 
         # good to go!
         else:
+            old_centroid = closest_subcluster.centroid_.copy()
             merged = closest_subcluster.merge_subcluster(subcluster, self.threshold)
+            centroids=self.centroids_
+
+            #leaf_centroids_copy=leaf_centroids
             if merged:
-                noise = subcluster.noise_criteria(closest_subcluster, leaf_centroids, True, tol, threshold)
+                sim=jt_pair(subcluster.centroid_, closest_subcluster.centroid_)
+                #print("merged: ", f"{sim:.2f}")
+
+                start=time.perf_counter()
+                noise = subcluster.noise_criteria(closest_subcluster, centroids, True, tol, threshold)
+                end=time.perf_counter()
                 if noise:
-                    return (True, None)
+                    return (True, None, None, None)
+                
                 closest_subcluster.update(subcluster)
                 self.centroids_[closest_index] = closest_subcluster.centroid_
                 self.init_centroids_[closest_index] = closest_subcluster.centroid_
+                #print("closest subcluster", closest_subcluster.centroid_)
+                #leaf_centroids = leaf_centroids_copy
+                #leaf_centroids=np.concatenate(leaf_centroids, closest_subcluster.centroid_)
                 if not singly:
                     closest_subcluster.parent_ = ps
-                return (False, False)
+                return (False, False, closest_subcluster.centroid_, old_centroid)
 
             # not close to any other subclusters, and we still
             # have space, so add.
             elif len(self.subclusters_) < self.branching_factor:
-                noise = subcluster.noise_criteria(closest_subcluster, leaf_centroids, False, tol, threshold)
-                if noise:
-                    return (True, None)
+                sim=jt_pair(subcluster.centroid_, closest_subcluster.centroid_)
+                #print("appended: ", f"{sim:.2f}")
+
+                start=time.perf_counter()
+                #noise = subcluster.noise_criteria(closest_subcluster, centroids, False, tol, threshold)
+                end=time.perf_counter()
+                if sim>sim_threshold:
+                    return (True, None, None, None)
                 self.append_subcluster(subcluster)
                 if not singly:
                     closest_subcluster.parent_ = ps
-                return (False, False)
+                #leaf_centroids = lea[None, None]f_centroids_copy
+                return (False, False, subcluster.centroid_, None)
 
             # We do not have enough space nor is it closer to an
             # other subcluster. We need to split.
             else:
-                noise = subcluster.noise_criteria(closest_subcluster, leaf_centroids, False, tol, threshold)
-                if noise:
-                    return (True, None)
+                sim=jt_pair(subcluster.centroid_, closest_subcluster.centroid_)
+                #print("split: ", f"{sim:.2f}")
+
+                start=time.perf_counter()
+                #noise = subcluster.noise_criteria(closest_subcluster, centroids, False, tol, threshold)
+                end=time.perf_counter()
+                if sim>sim_threshold:
+                    return (True, None, None, None)
                 self.append_subcluster(subcluster)
-                return (False, True)
+                #leaf_centroids = leaf_centroids_copy
+                return (False, True, subcluster.centroid_, None)
 
 
 class _BFSubcluster:
@@ -492,7 +525,7 @@ class _BFSubcluster:
         r = 1-threshold
         n = q <= r + p
         if np.sum(n) > 1:
-            return True
+            return True    #it is overlapping multiple clusters so eliminate
         elif np.sum(n) == 0:
             return False
         else: 
@@ -558,11 +591,13 @@ class BitBirch():
         *,
         threshold=0.5,
         branching_factor=50,
-        tolerance=0.05
+        tolerance=0.05,
+        sim_threshold=0.37
     ):
         self.threshold = threshold
         self.branching_factor = branching_factor
         self.tolerance = tolerance
+        self.sim_threshold = sim_threshold
         self.index_tracker = 0
         self.first_call = True
         self.noise = []
@@ -590,11 +625,14 @@ class BitBirch():
         threshold = self.threshold
         branching_factor = self.branching_factor
         tolerance = self.tolerance
+        sim_threshold = self.sim_threshold
 
         n_features = X.shape[1]
         #d_type = X.dtype
         d_type=np.uint64
-        leaf_centroids = []
+        #set_centroids = np.empty((0, n_features))
+        #set_centroids = pd.DataFrame({'centroids': []})
+        leaf_centroids = np.empty((0,n_features))
 
         # If partial_fit is called for the first time or fit is called, we
         # start a new tree.
@@ -629,11 +667,15 @@ class BitBirch():
             set_bits = np.sum(sample)
             sample=sample.astype(np.uint64)
             subcluster = _BFSubcluster(linear_sum=sample, mol_indices = [self.index_tracker])
-            noise, split = self.root_.insert_bf_subcluster(subcluster, set_bits,
-                                                           subcluster.parent_, singly,
-                                                           leaf_centroids, tolerance, threshold)
+            noise, split, new_centroid, old_centroid = self.root_.insert_bf_subcluster(subcluster, set_bits,
+                                                                    subcluster.parent_, singly,
+                                                                    leaf_centroids, tolerance, threshold,
+                                                                    sim_threshold)
             if noise:
                 self.noise.append(subcluster.mol_indices[0])
+                self.index_tracker += 1
+
+                continue
             if split:
                 new_subcluster1, new_subcluster2 = _split_node(
                     self.root_, threshold, branching_factor, singly
@@ -656,16 +698,40 @@ class BitBirch():
                         i.parent_ = new_subcluster2
 
             self.index_tracker += 1
-            if self.index_tracker%10000==0:
-                print(self.index_tracker)
-            leaf_centroids = np.concatenate([leaf.centroids_ for leaf in self._get_leaves()])
+
+            # print("old", old_centroid)
+            # print("new", new_centroid)
+            # print("sub", subcluster.centroid_)
+            
+            # if old_centroid is None:
+            #     #print("appended")
+            #     #set_centroids.loc[len(set_centroids)] = [new_centroid]
+            #     #set_centroids[num_cent] = new_centroid
+            #     set_centroids = np.vstack((set_centroids, new_centroid))
+            #     num_cent+=1
+            # else:
+            #     #print("merged")
+            #     # set_centroids.loc[len(set_centroids)] = [old_centroid]
+            #     # set_centroids.loc[len(set_centroids)] = [new_centroid]
+            #     #print(set_centroids.shape, old_centroid.shape, new_centroid.shape)
+            #     #set_centroids[num_cent] = new_centroid
+            #     set_centroids = np.vstack((set_centroids, new_centroid))
+            #     mask = ~(set_centroids == old_centroid).all(axis=1)
+            #     set_centroids = set_centroids[mask]
+
+            #leaf_centroids = np.concatenate([leaf.centroids_ for leaf in self._get_leaves()])
+            # print(leaf_centroids)
+            # print(set_centroids)
+            # print()
+
+            # print("leaf ceneroids", leaf_centroids)
+            # print("set centroids", list(set_centroids))
 
         centroids = np.concatenate([leaf.centroids_ for leaf in self._get_leaves()])
         self.subcluster_centers_ = centroids
         self._n_features_out = self.subcluster_centers_.shape[0]
         
         self.first_call = False
-        print("noise crit time", sum)
         return self
     
     def fit_reinsert(self, X, reinsert_indices, singly=False):

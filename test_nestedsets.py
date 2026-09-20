@@ -1,4 +1,6 @@
-import bitbirch.bitbirch as bb
+import bitbirch.bitbirch as bb_
+import bitbirch.bb_entire_old as bb_
+import bitbirch.bitbirch_k_copy as bb
 
 import numpy as np
 import time
@@ -13,13 +15,13 @@ from collections import namedtuple
 
 n=int(sys.argv[1])
 features=2048
-threshold=0.42
-bf=50
+threshold=0.6
+bf=20
 
 #np.random.seed(80)   
 #data=np.random.randint(2, size=(n,features))  
 data=np.load("../smi/BRD4_train_total.npy")
-rng=np.random.default_rng(4) 
+rng=np.random.default_rng(3) 
 random_indices=rng.choice(data.shape[0], size=n, replace=False)
 data=data[random_indices] 
 print(data)
@@ -50,6 +52,14 @@ def get_pkl_memry(obj):
     byte_size = len(pickled_bytes)
     print(f"Pickled size: {byte_size / 1024:.2f} KB")
 
+    
+
+def bisect_left_search(lst, elem):
+    i = bisect_left(lst, elem)
+    if i != len(lst) and lst[i] == elem:
+        return i
+    return -1
+
 
 
 #compression function
@@ -74,7 +84,7 @@ class CappedIntBlob(list[int]):
             # If input is a string, decode and decompress it
             bs: bytes = zlib.decompress(base64.b64decode(contents))
             # < = little endian, H = unsigned short with 2-byte size integers
-            self.lst = struct.unpack("<" + "H" * int(len(bs) / 2), bs)
+            self.lst = struct.unpack("<" + "q" * int(len(bs) / 2), bs)
         elif isinstance(contents, Iterable):
             self.lst = [min(int(x), self.max) for x in contents]
         else:
@@ -86,14 +96,7 @@ class CappedIntBlob(list[int]):
         """Convert to string
         @return: base64 string encoding for list of ints in 2 byte unsigned short integer representation.
         """
-        return base64.b64encode(zlib.compress(struct.pack("<" + "H" * len(self), *self))).decode("utf-8")
-
-
-def bisect_left_search(lst, elem):
-    i = bisect_left(lst, elem)
-    if i != len(lst) and lst[i] == elem:
-        return i
-    return -1
+        return base64.b64encode(zlib.compress(struct.pack("<" + "q" * len(self), *self))).decode("utf-8")
 
 
 #nested sets
@@ -112,7 +115,7 @@ def retrieve_root(model):
 
     return root_node
 
-NS_stats=namedtuple("NS_stats", ["indices", "leaf_stats", "leaf_idx", "root_stats"])
+NS_stats=namedtuple("NS_stats", ["indices", "leaf_stats", "leaf_idx", "root_stats", "reordered_indices"])
 
 def build_nested_sets(model):
     '''
@@ -152,7 +155,7 @@ def build_nested_sets(model):
             mol_inds=[]
             for ind, sub in enumerate(node.subclusters_):
                 lin_sums[ind]=sub.linear_sum_
-                mol_inds.append(sub.mol_indices)
+                mol_inds.append(str(CappedIntBlob(sub.mol_indices)))
             leaf_stats.append([lin_sums, mol_inds])
             return
         
@@ -179,7 +182,7 @@ def build_nested_sets(model):
 
     build_nested_sets_helper(model.root_, counter, parent_id, indices, leaf_stats, leaf_idx)
 
-    ns_stats=NS_stats(indices, leaf_stats, leaf_idx, root_stats)
+    ns_stats=NS_stats(indices, leaf_stats, leaf_idx, root_stats, 0)
     return ns_stats
 
 ##finding higher node details ground up:
@@ -237,12 +240,104 @@ def ground_up(left_id, right_id, ns_stats):
     
     return np.array(centroids)
 
+#reordering ns_stats.indices into more readable format
+def reorder_ns_stats_indices(ns_stats):
+    '''
+    Docstring for reorder_ns_stats_indices
+    This function essentially reorders the ns_stats.indices into a more understandible
+    format. It will categorize the indices by its correspondng the levels. For example,
+    the root node will be the first element, then all the nodes pertaining in the level beneath, 
+    then so on until the leaf nodes which constitude at the end of the list
+    
+    :param ns_stats: Description
 
+    Output: a new NS_stats tuple
+    '''
+    og_indices=ns_stats.indices
+    left_indices=[left for left,right in og_indices]   #this is going to be in order so we can use binary
+    reordered=[og_indices[0]]
+
+    anchor_left=og_indices[1][0]
+    anchor_right=og_indices[1][1]
+
+    while anchor_right - anchor_left >1:
+        reordered.append(og_indices[1])
+
+        target=anchor_right+1
+
+        #grouping and reordering the nodes by level 
+        while target < og_indices[0][1]: # max value
+            next_left=bisect_left_search(left_indices, target)
+            reordered.append(og_indices[next_left])
+
+            target=og_indices[next_left][1] +1
+
+        anchor_left+=1
+        anchor_left_idx=bisect_left_search(left_indices, target)
+
+        if anchor_left_idx<0:
+            break
+
+        anchor_right=og_indices[anchor_left_idx][1]
+
+    #add the remaining leaf nodes indices
+    for i in ns_stats.leaf_idx:
+        reordered.append((i, i+1))
+    
+    new_ns_stats=NS_stats(ns_stats.indices, ns_stats.leaf_stats, ns_stats.leaf_idx, 
+                          ns_stats.root_stats, reordered)
+    return new_ns_stats
+
+def print_ns_stats_indices(ns_stats):
+    '''
+    Docstring for print_ns_stats_indices
+    This function prints out the indices of the non-leafnodes for better understanding of the 
+    hierarchical structure. Ideally use this function only after invoking reorder_ns_stats_indices 
+    
+    :param ns_stats: Description
+
+    Output: void
+    '''
+    right_max=ns_stats.reordered_indices[0][1]
+    level=0
+    if level==0:
+        print("Root node")
+    for left, right in ns_stats.reordered_indices:
+        if right-left==1:
+            print("Leaves")
+            break
+
+        print(f"{left:<5}  {right}")
+
+        if right==right_max:
+            print("-------------")
+            right_max-=1
+            level+=1
+
+            print(f"Level {level}")
+
+            
 #inserting a molecule (without modifying the tree)
 def insert_static(new_mol, ns_stats):
+    '''
+    Docstring for insert_static
+    This function inserts a new molecule into the tree and returns the 
+    centroid and mol_indices pertaining to the leaf cluster the molecule 
+    would have landed. It does NOT modify or save the new molecule into the tree.
+    
+    :param new_mol: np.array; of size 2048 features, describing the SMILES 
+                    fingerprint of the molecule you want to insert to tree
+    :param ns_stats: namedtuple output from build_nested_sets function
+
+    Output: list[np.ndarray, list[list[int]]]: an element 
+    '''
     a = np.dot(ns_stats.root_stats, new_mol)
     sim_matrix = a / (np.sum(ns_stats.root_stats, axis = 1) + np.sum(new_mol) - a)
     closest_index = np.argmax(sim_matrix)
+
+    if len(ns_stats.indices)==1:   #there is actually one leaf node for this tree
+        print(closest_index)
+        return ns_stats.leaf_stats[0][0][closest_index], ns_stats.leaf_stats[0][1][closest_index]
 
     #find corresponding indices: starting at root level
     left_indices=[x[0] for x in ns_stats.indices]
@@ -254,6 +349,7 @@ def insert_static(new_mol, ns_stats):
     index=bisect_left(left_indices, start_left)
     start_right=ns_stats.indices[index][1]
 
+    #traverse down the tree
     while start_right-start_left!=1:
         centroids=ground_up(start_left, start_right, ns_stats)
 
@@ -264,6 +360,7 @@ def insert_static(new_mol, ns_stats):
         for _ in range(closest_index):
             index=bisect_left(left_indices, start_left+1)
             start_left=ns_stats.indices[index][1]+1
+
             index=bisect_left(left_indices, start_left)
             start_right=ns_stats.indices[index][1]
 
@@ -271,21 +368,88 @@ def insert_static(new_mol, ns_stats):
         index=bisect_left(left_indices, start_left)
         start_right=ns_stats.indices[index][1]
 
+    #we've reached the leaf level, almost to there
     index=bisect_left(ns_stats.leaf_idx, start_left)
-    return ns_stats.leaf_stats[index]
+
+    a = np.dot(ns_stats.leaf_stats[index][0], new_mol)
+    sim_matrix = a / (np.sum(ns_stats.leaf_stats[index][0], axis = 1) + np.sum(new_mol) - a)
+    closest_index = np.argmax(sim_matrix)
+
+    return ns_stats.leaf_stats[0][0][closest_index], ns_stats.leaf_stats[0][1][closest_index]
+
+def retrieve_k_level_nodes(level_k, ns_stats):
+    '''
+    Docstring for retrieve_k_level_nodes
+    This function returns the pertaining centroids of all the nodes at the level of interest
+
+    :param k: int, the level of interest
+    :param ns_stats: NS_Stats named tuple
+
+    Output: np.ndarray: of the centroids 
+    '''
+    #check if requested level is even possible
+    leaf_level=ns_stats.leaf_idx[0]
+    if level_k==leaf_level:
+        print("The requested level is at the leaf level.")
+    elif level_k>leaf_level:
+        print(f"You have too few levels. Please input a number smaller or equal to {leaf_level}.")
+        return
+    
+    indices=ns_stats.reordered_indices
+    nodes=[]
+
+    target_idx=0
+    for i, index in enumerate(indices):
+        if index[0]==level_k:
+            target_idx=i
+            break
+    
+    #only need to check the contingous indices in that section 
+    while indices[target_idx][0]!=level_k+1:
+        nodes.append(ground_up(indices[target_idx][0],
+                               indices[target_idx][1],
+                               ns_stats))
+        target_idx+=1
+
+    return nodes
+
+def insert_static_at_k_level(new_mol, level_k, ns_stats):
+    nodes=retrieve_k_level_nodes(level_k, ns_stats)
+    concat_nodes=np.vstack(nodes)
+
+    a = np.dot(concat_nodes, new_mol)
+    sim_matrix = a / (np.sum(concat_nodes, axis = 1) + np.sum(new_mol) - a)
+    closest_index = np.argmax(sim_matrix)
+
+    #figure out which node 
 
 
+
+
+
+
+
+
+#testings
+print(str(CappedIntBlob([1,2,3])))
 
 start=time.perf_counter()
 ns_stats=build_nested_sets(model)
 end=time.perf_counter()
 print("time", end-start)
 
+print((ns_stats.indices))
+ns_stats=reorder_ns_stats_indices(ns_stats)
+print_ns_stats_indices(ns_stats)
+
 start=time.perf_counter()
-final_leaf=insert_static(model.root_.subclusters_[0].centroid_, ns_stats)
+final_leaf_ls, final_leaf_mol_ind=insert_static(model.root_.subclusters_[1].centroid_, ns_stats)
+
+print(final_leaf_ls)
+
 end=time.perf_counter()
 print("time", end-start)
-print(final_leaf)
+#print(final_leaf)
 
 
 get_pkl_memry(model)
